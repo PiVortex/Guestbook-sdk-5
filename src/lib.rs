@@ -1,6 +1,6 @@
+use near_sdk::{env, AccountId, NearToken, near_bindgen};
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::serde::Serialize;
-use near_sdk::{env, AccountId, NearToken, near_bindgen};
 use near_sdk::collections::{Vector};
 use near_sdk::json_types::{U128};
 use near_sdk::schemars::JsonSchema;
@@ -10,6 +10,7 @@ const POINT_ONE: NearToken = NearToken::from_millinear(100);
 #[derive(BorshDeserialize, BorshSerialize, Serialize, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 #[borsh(crate = "near_sdk::borsh")]
+#[schemars(crate = "near_sdk::schemars")]
 pub struct PostedMessage {
   pub premium: bool, 
   pub sender: AccountId,
