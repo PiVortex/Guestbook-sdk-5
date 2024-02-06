@@ -1,78 +1,91 @@
 use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
-use near_sdk::collections::LookupMap;
-use near_sdk::{env, near_bindgen, AccountId, BorshStorageKey};
+use near_sdk::serde::Serialize;
+use near_sdk::{env, AccountId, NearToken, near_bindgen};
+use near_sdk::collections::{Vector};
+use near_sdk::json_types::{U128};
+use near_sdk::schemars::JsonSchema;
+
+const POINT_ONE: NearToken = NearToken::from_millinear(100);
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, JsonSchema)]
+#[serde(crate = "near_sdk::serde")]
+#[borsh(crate = "near_sdk::borsh")]
+pub struct PostedMessage {
+  pub premium: bool, 
+  pub sender: AccountId,
+  pub text: String
+}
 
 #[near_bindgen]
+#[borsh(crate = "near_sdk::borsh")]
 #[derive(BorshDeserialize, BorshSerialize)]
-#[borsh(crate = "near_sdk::borsh")]
-pub struct StatusMessage {
-    records: LookupMap<AccountId, String>,
+struct GuestBook {
+  messages: Vector<PostedMessage>,
 }
 
-#[derive(BorshSerialize, BorshStorageKey)]
-#[borsh(crate = "near_sdk::borsh")]
-enum StorageKey {
-    StatusMessageRecords,
-}
-
-impl Default for StatusMessage {
-    fn default() -> Self {
-        Self {
-            records: LookupMap::new(StorageKey::StatusMessageRecords),
-        }
-    }
+impl Default for GuestBook{
+  fn default() -> Self {
+    Self{messages: Vector::new(b"m")}
+  }
 }
 
 #[near_bindgen]
-impl StatusMessage {
-    pub fn set_status(&mut self, message: String) {
-        let account_id = env::predecessor_account_id();
-        self.records.insert(&account_id, &message);
-    }
+impl GuestBook {
 
-    pub fn get_status(&self, account_id: AccountId) -> Option<String> {
-        self.records.get(&account_id)
-    }
+  #[payable]
+  pub fn add_message(&mut self, text: String) {
+    // If the user attaches more than 0.01N the message is premium
+    let premium = env::attached_deposit() >= POINT_ONE;
+    let sender = env::predecessor_account_id();
+
+    let message = PostedMessage{premium, sender, text};
+    self.messages.push(&message);
+  }
+
+  pub fn get_messages(&self, from_index:Option<U128>, limit:Option<u64>) -> Vec<PostedMessage>{
+    let from = u128::from(from_index.unwrap_or(U128(0)));
+
+    self.messages.iter()
+    .skip(from as usize)
+    .take(limit.unwrap_or(10) as usize)
+    .collect()
+  }
+
+  pub fn total_messages(&self) -> u64 { self.messages.len() }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+/*
+ * the rest of this file sets up unit tests
+ * to run these, the command will be: `cargo test`
+ */
+
+// use the attribute below for unit tests
 #[cfg(test)]
 mod tests {
-    use near_sdk::test_utils::{accounts, VMContextBuilder};
-    use near_sdk::testing_env;
+  use super::*;
 
-    use super::*;
+  #[test]
+  fn add_message() {
+    let mut contract = GuestBook::default();
+    contract.add_message("A message".to_string());
 
-    // Allows for modifying the environment of the mocked blockchain
-    fn get_context(predecessor_account_id: AccountId) -> VMContextBuilder {
-        let mut builder = VMContextBuilder::new();
-        builder
-            .current_account_id(accounts(0))
-            .signer_account_id(predecessor_account_id.clone())
-            .predecessor_account_id(predecessor_account_id);
-        builder
-    }
+    let posted_message = &contract.get_messages(None, None)[0];
+    assert_eq!(posted_message.premium, false);
+    assert_eq!(posted_message.text, "A message".to_string());
+  }
 
-    #[test]
-    fn set_get_message() {
-        let mut context = get_context(accounts(1));
-        // Initialize the mocked blockchain
-        testing_env!(context.build());
+  #[test]
+  fn iters_messages() {
+    let mut contract = GuestBook::default();
+    contract.add_message("1st message".to_string());
+    contract.add_message("2nd message".to_string());
+    contract.add_message("3rd message".to_string());
+    
+    let total = &contract.total_messages();
+    assert!(*total == 3);
 
-        // Set the testing environment for the subsequent calls
-        testing_env!(context.predecessor_account_id(accounts(1)).build());
-
-        let mut contract = StatusMessage::default();
-        contract.set_status("hello".to_string());
-        assert_eq!(
-            "hello".to_string(),
-            contract.get_status(accounts(1)).unwrap()
-        );
-    }
-
-    #[test]
-    fn get_nonexistent_message() {
-        let contract = StatusMessage::default();
-        assert_eq!(None, contract.get_status("francis.near".parse().unwrap()));
-    }
+    let last_message = &contract.get_messages(Some(U128::from(1)), Some(2))[1];
+    assert_eq!(last_message.premium, false);
+    assert_eq!(last_message.text, "3rd message".to_string());
+  }
 }
